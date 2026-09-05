@@ -342,3 +342,43 @@ impl Encrypt {
         Ok(Key(key))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sodiumoxide::crypto::{box_, secretbox};
+
+    #[test]
+    fn secretbox_roundtrip_encrypts_session_bytes() {
+        sodiumoxide::init().ok();
+        let key = secretbox::gen_key();
+        let mut enc = Encrypt::new(key.clone());
+        let mut dec = Encrypt::new(key);
+        let cipher = enc.enc(b"hello desk");
+        assert_ne!(&cipher[..], b"hello desk");
+        let mut bytes = BytesMut::from(&cipher[..]);
+        dec.dec(&mut bytes).unwrap();
+        assert_eq!(&bytes[..], b"hello desk");
+    }
+
+    #[test]
+    fn handshake_rejects_short_peer_public_key() {
+        sodiumoxide::init().ok();
+        let (_, sk) = box_::gen_keypair();
+        let err = Encrypt::decode(&[0u8; 16], &[0u8; 8], &sk).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("pk length"), "unexpected: {}", msg);
+    }
+
+    #[test]
+    fn session_crypto_is_nacl_not_post_quantum() {
+        // Curve25519 + XSalsa20-Poly1305. A quantum computer that runs Shor
+        // breaks the handshake. ML-KEM-768 public keys are 1184 bytes; we
+        // do not speak that. Do not claim quantum-proof.
+        assert_eq!(box_::PUBLICKEYBYTES, 32);
+        assert_eq!(box_::SECRETKEYBYTES, 32);
+        assert_eq!(secretbox::KEYBYTES, 32);
+        assert_eq!(secretbox::MACBYTES, 16);
+        assert_ne!(box_::PUBLICKEYBYTES, 1184);
+    }
+}
